@@ -1,15 +1,22 @@
 # On part d'une version de Python légère
 FROM python:3.9-slim
 
-# 1. On installe les outils système, l'écran virtuel (xvfb) et de quoi télécharger
+# 1. On installe les outils système
+# J'ai retiré 'libgconf-2-4' qui plantait et ajouté des outils indispensables pour Chrome (libnss3, gtk3, etc.)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
     xvfb \
     libxi6 \
-    libgconf-2-4 \
     default-jdk \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    fonts-liberation \
+    libgbm1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. On installe Google Chrome (La version stable officielle)
