@@ -2,10 +2,12 @@ import discord
 from discord.ext import commands
 import os
 import re
+import time
 from dotenv import load_dotenv
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from bs4 import BeautifulSoup
+import urllib.request # Nécessaire pour le self-ping
 
 # --- 1. FAUX SERVEUR WEB (POUR RENDER) ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -13,15 +15,32 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b"Bot HTML is running!")
+        self.wfile.write(b"Bot is active and listening!")
 
 def start_fake_server():
+    # Récupère le port donné par Render ou utilise 8080 par défaut
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    print(f"🌍 Serveur actif sur le port {port}")
+    print(f"🌍 Serveur Web actif sur le port {port}")
     server.serve_forever()
 
+# --- NOUVEAU : SYSTÈME ANTI-SOMMEIL ---
+def ping_self():
+    while True:
+        # On attend 5 minutes (300 secondes)
+        time.sleep(290) 
+        try:
+            port = int(os.environ.get("PORT", 8080))
+            # Le bot s'envoie une requête à lui-même
+            url = f"http://127.0.0.1:{port}"
+            with urllib.request.urlopen(url) as response:
+                print(f"⏰ Auto-Ping envoyé ({response.status}) : Bot maintenu éveillé.")
+        except Exception as e:
+            print(f"⚠️ Erreur Auto-Ping : {e}")
+
+# Lancement des tâches de fond (Serveur + Ping)
 Thread(target=start_fake_server, daemon=True).start()
+Thread(target=ping_self, daemon=True).start()
 
 # --- 2. CONFIGURATION ---
 load_dotenv()
@@ -31,7 +50,7 @@ try:
 except:
     ID_SALON = 0
 
-# LIEN DU TICKET (Configurable ici)
+# LIEN DU TICKET
 TICKET_LINK = "https://discord.com/channels/1316619303994396732/1355540389343531139/1355547355163660421"
 
 intents = discord.Intents.default()
@@ -89,31 +108,24 @@ def determine_offer(text):
     can_oc_ram = False
     can_oc_gpu = False
 
-    # CPU Check
     if is_intel:
         if is_intel_k and chipset_prefix == "Z": can_oc_cpu = True
     elif is_amd:
         if chipset_prefix in ["B", "X"]: can_oc_cpu = True
 
-    # RAM Check
     if is_intel:
         if chipset_prefix == "Z" or is_intel_b_unlock: can_oc_ram = True
     elif is_amd:
         if chipset_prefix in ["B", "X"]: can_oc_ram = True
 
-    # GPU Check
     if (is_nvidia or is_amd_gpu) and not is_intel_gpu: can_oc_gpu = True
 
-    # Capacités finales pour l'affichage
     caps = {"cpu": can_oc_cpu, "ram": can_oc_ram, "gpu": can_oc_gpu}
 
-    # --- D. Sélection du Prix et Nom ---
-    
-    # Cas X3D
+    # --- D. Sélection du Prix ---
     if is_x3d:
         return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D AM5"}
 
-    # Cas DDR5
     if is_ddr5:
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
             return {"price": "195€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR5"}
@@ -124,7 +136,6 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "40€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul (DDR5)"}
     
-    # Cas DDR4
     else:
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
             return {"price": "85€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR4"}
@@ -135,7 +146,6 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
 
-    # Fallback
     return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
 
 # --- 5. EVENTS ---
@@ -148,7 +158,6 @@ async def on_message(message):
     if message.author == bot.user: return
     if ID_SALON != 0 and message.channel.id != ID_SALON: return
 
-    # Détection fichier HTML
     if message.attachments:
         for attachment in message.attachments:
             if attachment.filename.lower().endswith(('.html', '.htm')):
@@ -162,13 +171,10 @@ async def on_message(message):
 
                 res = determine_offer(data["raw_text"])
                 
-                # --- FORMATAGE DE LA RÉPONSE ---
-                
                 if res["is_laptop"]:
                      response = f"⛔ **PC Portable détecté**\n"
                      response += "Nous ne réalisons pas de prestations sur les PC portables."
                 else:
-                    # Les émojis selon la capacité
                     c_cpu = "✅" if res["caps"]["cpu"] else "❌"
                     c_ram = "✅" if res["caps"]["ram"] else "❌"
                     c_gpu = "✅" if res["caps"]["gpu"] else "❌"
@@ -183,7 +189,6 @@ async def on_message(message):
                 await msg.edit(content=response)
                 return
 
-    # Message d'aide si lien
     if "userdiag.com" in message.content:
         await message.channel.send(f"ℹ️ {message.author.mention}, merci d'envoyer le rapport en fichier HTML.\n**(CTRL + S sur la page > Enregistrer > Glisser le fichier ici)**", delete_after=20)
 
