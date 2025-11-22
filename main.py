@@ -31,6 +31,9 @@ try:
 except:
     ID_SALON = 0
 
+# LIEN DU TICKET (Configurable ici)
+TICKET_LINK = "https://discord.com/channels/1316619303994396732/1355540389343531139/1355547355163660421"
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -38,24 +41,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # --- 3. MOTEUR D'ANALYSE HTML ---
 async def analyze_html(attachment):
     try:
-        # Lecture du fichier en mémoire
         file_bytes = await attachment.read()
-        
-        # Conversion des octets en texte (UTF-8)
-        # errors='ignore' permet d'éviter le crash si un caractère est bizarre
         html_content = file_bytes.decode('utf-8', errors='ignore')
-        
-        # Nettoyage avec BeautifulSoup
         soup = BeautifulSoup(html_content, "html.parser")
-        
-        # Extraction de tout le texte visible, en majuscules
         text = soup.get_text(" ", strip=True).upper()
-        
         return {"raw_text": text}
     except Exception as e:
         return {"error": f"Lecture HTML impossible : {str(e)}"}
 
-# --- 4. LOGIQUE COMMERCIALE (OFFRES) ---
+# --- 4. LOGIQUE ET FORMATAGE ---
 def determine_offer(text):
     
     # --- A. Détection PC Portable ---
@@ -64,10 +58,10 @@ def determine_offer(text):
     
     if is_laptop:
         return {
-            "name": "⛔ PC Portable détecté",
             "price": "Non pris en charge",
-            "desc": "Pas d'overclocking sur PC portable.",
-            "is_laptop": True
+            "caps": {"cpu": False, "ram": False, "gpu": False},
+            "is_laptop": True,
+            "pack_name": "PC Portable"
         }
 
     # --- B. Matériel ---
@@ -90,30 +84,59 @@ def determine_offer(text):
     if freq_match and int(freq_match.group(1)) > 4400: is_ddr5 = True
     if "RYZEN" in text and any(c in text for c in ["7600", "7700", "7900", "9000"]): is_ddr5 = True
 
-    # --- C. Eligibilité ---
-    can_oc_cpu = (is_intel and is_intel_k and chipset_prefix == "Z") or \
-                 (is_amd and chipset_prefix in ["B", "X"])
+    # --- C. Eligibilité (Capacités) ---
+    can_oc_cpu = False
+    can_oc_ram = False
+    can_oc_gpu = False
 
-    can_oc_ram = (is_intel and (chipset_prefix == "Z" or is_intel_b_unlock)) or \
-                 (is_amd and chipset_prefix in ["B", "X"])
+    # CPU Check
+    if is_intel:
+        if is_intel_k and chipset_prefix == "Z": can_oc_cpu = True
+    elif is_amd:
+        if chipset_prefix in ["B", "X"]: can_oc_cpu = True
 
-    can_oc_gpu = (is_nvidia or is_amd_gpu) and not is_intel_gpu
+    # RAM Check
+    if is_intel:
+        if chipset_prefix == "Z" or is_intel_b_unlock: can_oc_ram = True
+    elif is_amd:
+        if chipset_prefix in ["B", "X"]: can_oc_ram = True
 
-    # --- D. Sélection Offre ---
-    if is_x3d: return {"name": "🔥 Spécial X3D AM5", "price": "95€", "desc": "Optimisation X3D."}
+    # GPU Check
+    if (is_nvidia or is_amd_gpu) and not is_intel_gpu: can_oc_gpu = True
 
+    # Capacités finales pour l'affichage
+    caps = {"cpu": can_oc_cpu, "ram": can_oc_ram, "gpu": can_oc_gpu}
+
+    # --- D. Sélection du Prix et Nom ---
+    
+    # Cas X3D
+    if is_x3d:
+        return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D AM5"}
+
+    # Cas DDR5
     if is_ddr5:
-        if can_oc_cpu and can_oc_ram and can_oc_gpu: return {"name": "🚀 Pack Complet DDR5", "price": "195€", "desc": "Full OC DDR5"}
-        if can_oc_ram and can_oc_gpu: return {"name": "⚡ RAM DDR5 + GPU", "price": "135€", "desc": "Focus RAM/GPU"}
-        if can_oc_cpu and can_oc_ram: return {"name": "🧠 CPU + RAM DDR5", "price": "155€", "desc": "Focus CPU/RAM"}
-        if can_oc_cpu: return {"name": "⚙️ CPU Seul (DDR5)", "price": "40€", "desc": "CPU Only"}
+        if can_oc_cpu and can_oc_ram and can_oc_gpu:
+            return {"price": "195€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR5"}
+        elif can_oc_ram and can_oc_gpu:
+            return {"price": "135€", "caps": caps, "is_laptop": False, "pack_name": "RAM DDR5 + GPU"}
+        elif can_oc_cpu and can_oc_ram:
+             return {"price": "155€", "caps": caps, "is_laptop": False, "pack_name": "CPU + RAM DDR5"}
+        elif can_oc_cpu:
+            return {"price": "40€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul (DDR5)"}
+    
+    # Cas DDR4
     else:
-        if can_oc_cpu and can_oc_ram and can_oc_gpu: return {"name": "💎 Pack Complet DDR4", "price": "85€", "desc": "Full OC DDR4"}
-        if can_oc_ram and can_oc_gpu: return {"name": "⚡ RAM + GPU (DDR4)", "price": "55€", "desc": "Focus RAM/GPU"}
-        if can_oc_cpu and can_oc_ram: return {"name": "🧠 CPU + RAM (DDR4)", "price": "65€", "desc": "Focus CPU/RAM"}
-        if can_oc_cpu: return {"name": "⚙️ CPU Seul", "price": "20€", "desc": "CPU Only"}
+        if can_oc_cpu and can_oc_ram and can_oc_gpu:
+            return {"price": "85€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR4"}
+        elif can_oc_ram and can_oc_gpu:
+            return {"price": "55€", "caps": caps, "is_laptop": False, "pack_name": "RAM + GPU (DDR4)"}
+        elif can_oc_cpu and can_oc_ram:
+             return {"price": "65€", "caps": caps, "is_laptop": False, "pack_name": "CPU + RAM (DDR4)"}
+        elif can_oc_cpu:
+            return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
 
-    return {"name": "🛠️ Optimisation Windows", "price": "Sur devis", "desc": "Matériel non éligible OC complet."}
+    # Fallback
+    return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
 
 # --- 5. EVENTS ---
 @bot.event
@@ -137,19 +160,30 @@ async def on_message(message):
                     await msg.edit(content=f"❌ {data['error']}")
                     return
 
-                offer = determine_offer(data["raw_text"])
+                res = determine_offer(data["raw_text"])
                 
-                # Affichage
-                emoji = "⛔" if offer.get("is_laptop") else "✅"
-                embed = f"**📊 Rapport {message.author.mention}**\n━━━━━━━━━━━━━━━━\n"
-                embed += f"{emoji} **{offer['name']}**\n💰 **{offer['price']}**\n📝 *{offer['desc']}*\n━━━━━━━━━━━━━━━━"
-                if not offer.get("is_laptop"):
-                    embed += "\n**💎 Inclus :** Gains FPS • SAV à vie • Backup Cloud"
+                # --- FORMATAGE DE LA RÉPONSE ---
+                
+                if res["is_laptop"]:
+                     response = f"⛔ **PC Portable détecté**\n"
+                     response += "Nous ne réalisons pas de prestations sur les PC portables."
+                else:
+                    # Les émojis selon la capacité
+                    c_cpu = "✅" if res["caps"]["cpu"] else "❌"
+                    c_ram = "✅" if res["caps"]["ram"] else "❌"
+                    c_gpu = "✅" if res["caps"]["gpu"] else "❌"
 
-                await msg.edit(content=embed)
+                    response = f"**Ton PC peut faire :**\n"
+                    response += f"- Un Overclock CPU {c_cpu}\n"
+                    response += f"- Un Overclock RAM {c_ram}\n"
+                    response += f"- Un Overclock GPU {c_gpu}\n\n"
+                    response += f"C'est donc la prestation **{res['pack_name']}** à **{res['price']}**\n"
+                    response += f"Pour faire ta demande crée ton ticket ici 👉 {TICKET_LINK}"
+
+                await msg.edit(content=response)
                 return
 
-    # Message d'aide
+    # Message d'aide si lien
     if "userdiag.com" in message.content:
         await message.channel.send(f"ℹ️ {message.author.mention}, merci d'envoyer le rapport en fichier HTML.\n**(CTRL + S sur la page > Enregistrer > Glisser le fichier ici)**", delete_after=20)
 
