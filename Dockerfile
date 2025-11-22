@@ -1,7 +1,8 @@
 # Utilisation de Python 3.9 version légère
 FROM python:3.9-slim
 
-# 1. Installation des dépendances système indispensables
+# 1. Installation des dépendances système
+# AJOUT DE : python3-tk et python3-dev (Indispensables pour la souris/SeleniumBase)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -16,9 +17,11 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     fonts-liberation \
     libgbm1 \
+    python3-tk \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Installation de Google Chrome (Méthode Moderne sans apt-key)
+# 2. Installation de Google Chrome (Méthode Moderne sécurisée)
 RUN mkdir -p /etc/apt/keyrings \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list \
