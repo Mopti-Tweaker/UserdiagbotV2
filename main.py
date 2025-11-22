@@ -31,7 +31,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # --- 1. SCRAPING ---
 def scrape_userdiag(url):
     data = {}
-    with SB(uc=True, headless=False) as sb:
+    with SB(uc=True, headless=False, xvfb=True) as sb:
         try:
             print(f"🔍 Analyse : {url}")
             sb.driver.uc_open_with_reconnect(url, 4)
