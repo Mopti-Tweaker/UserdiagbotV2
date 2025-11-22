@@ -1,0 +1,4 @@
+discord.py
+seleniumbase
+beautifulsoup4
+python-dotenv
