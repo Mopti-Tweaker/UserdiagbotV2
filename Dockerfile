@@ -1,8 +1,7 @@
 # Utilisation de Python 3.9 version légère
 FROM python:3.9-slim
 
-# 1. Installation des dépendances système
-# libgconf-2-4 a été retiré et remplacé par les dépendances modernes de Chrome
+# 1. Installation des dépendances système indispensables
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -19,9 +18,10 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Installation de Google Chrome (Version Stable)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+# 2. Installation de Google Chrome (Méthode Moderne sans apt-key)
+RUN mkdir -p /etc/apt/keyrings \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
