@@ -73,6 +73,8 @@ def determine_offer(text):
     
     # --- A. Détection PC Portable ---
     mobile_cpu = r'\d{4,5}(?:H|HK|HX|HS|HQ|U|P|Y)\b'
+    # Note: "INTEGRATED GRAPHICS" peut aussi être sur des PC fixes (iGPU)
+    # C'est une détection large, mais qui semble être ce que vous souhaitez.
     is_laptop = bool(re.search(mobile_cpu, text)) or "BATTERY" in text or "LAPTOP" in text or "INTEGRATED GRAPHICS" in text
     
     if is_laptop:
@@ -84,7 +86,7 @@ def determine_offer(text):
         }
 
     # --- B. Matériel ---
-    is_intel = "INTEL" in text
+    is_intel = "INTEL CORE" in text or "PENTIUM" in text or "CELERON" in text
     is_amd = "RYZEN" in text or "AMD" in text
     is_intel_k = bool(re.search(r'\d{3,5}K[SF]?(?!\w)', text))
     is_x3d = "X3D" in text and any(x in text for x in ["7800", "7900", "7950", "9800"])
@@ -95,7 +97,10 @@ def determine_offer(text):
     
     is_nvidia = any(g in text for g in ["NVIDIA", "GEFORCE", "RTX", "GTX"])
     is_amd_gpu = ("RADEON" in text or "RX 6" in text or "RX 7" in text) and "VEGA" not in text
-    is_intel_gpu = "INTEL ARC" in text or "IRIS" in text
+    
+    # --- MODIFICATION ---
+    # Ajout de "INTEL UHD" pour attraper les iGPU Intel courants
+    is_intel_gpu = "INTEL ARC" in text or "IRIS" in text or "INTEL UHD" in text
 
     # DDR5 Check
     is_ddr5 = False
@@ -118,7 +123,11 @@ def determine_offer(text):
     elif is_amd:
         if chipset_prefix in ["B", "X"]: can_oc_ram = True
 
-    if (is_nvidia or is_amd_gpu) and not is_intel_gpu: can_oc_gpu = True
+    # Cette logique est correcte. 
+    # Maintenant que is_intel_gpu (section B) est plus précis, 
+    # "and not is_intel_gpu" fonctionnera comme prévu.
+    if (is_nvidia or is_amd_gpu) and not is_intel_gpu: 
+        can_oc_gpu = True
 
     caps = {"cpu": can_oc_cpu, "ram": can_oc_ram, "gpu": can_oc_gpu}
 
@@ -136,7 +145,7 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "40€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul (DDR5)"}
     
-    else:
+    else: # DDR4
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
             return {"price": "85€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR4"}
         elif can_oc_ram and can_oc_gpu:
@@ -146,6 +155,7 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
 
+    # Cas par défaut si aucune offre ne correspond
     return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
 
 # --- 5. EVENTS ---
@@ -156,6 +166,7 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author == bot.user: return
+    # Si ID_SALON est 0, écoute tous les salons. Sinon, filtre.
     if ID_SALON != 0 and message.channel.id != ID_SALON: return
 
     if message.attachments:
@@ -172,8 +183,8 @@ async def on_message(message):
                 res = determine_offer(data["raw_text"])
                 
                 if res["is_laptop"]:
-                     response = f"⛔ **PC Portable détecté**\n"
-                     response += "Nous ne réalisons pas de prestations sur les PC portables."
+                        response = f"⛔ **PC Portable détecté**\n"
+                        response += "Nous ne réalisons pas de prestations sur les PC portables."
                 else:
                     c_cpu = "✅" if res["caps"]["cpu"] else "❌"
                     c_ram = "✅" if res["caps"]["ram"] else "❌"
@@ -187,12 +198,17 @@ async def on_message(message):
                     response += f"Pour faire ta demande crée ton ticket ici 👉 {TICKET_LINK}"
 
                 await msg.edit(content=response)
-                return
+                return # Analyse un seul fichier HTML par message
 
     if "userdiag.com" in message.content:
         await message.channel.send(f"ℹ️ {message.author.mention}, merci d'envoyer le rapport en fichier HTML.\n**(CTRL + S sur la page > Enregistrer > Glisser le fichier ici)**", delete_after=20)
 
+    # Nécessaire si vous avez d'autres commandes !
     await bot.process_commands(message)
 
+# --- 6. DÉMARRAGE ---
 if TOKEN:
+    print("🚀 Lancement du bot...")
     bot.run(TOKEN)
+else:
+    print("❌ ERREUR: DISCORD_TOKEN non trouvé dans le .env")
