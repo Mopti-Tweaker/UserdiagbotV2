@@ -73,8 +73,7 @@ def determine_offer(text):
     
     # --- A. Détection PC Portable ---
     mobile_cpu = r'\d{4,5}(?:H|HK|HX|HS|HQ|U|P|Y)\b'
-    # Note: "INTEGRATED GRAPHICS" peut aussi être sur des PC fixes (iGPU)
-    # C'est une détection large, mais qui semble être ce que vous souhaitez.
+    # La présence de "INTEGRATED GRAPHICS" contribue à la détection de PC portable.
     is_laptop = bool(re.search(mobile_cpu, text)) or "BATTERY" in text or "LAPTOP" in text or "INTEGRATED GRAPHICS" in text
     
     if is_laptop:
@@ -86,6 +85,7 @@ def determine_offer(text):
         }
 
     # --- B. Matériel ---
+    # Recherche spécifique des marques CPU pour éviter la confusion avec les GPU Intel
     is_intel = "INTEL CORE" in text or "PENTIUM" in text or "CELERON" in text
     is_amd = "RYZEN" in text or "AMD" in text
     is_intel_k = bool(re.search(r'\d{3,5}K[SF]?(?!\w)', text))
@@ -98,8 +98,7 @@ def determine_offer(text):
     is_nvidia = any(g in text for g in ["NVIDIA", "GEFORCE", "RTX", "GTX"])
     is_amd_gpu = ("RADEON" in text or "RX 6" in text or "RX 7" in text) and "VEGA" not in text
     
-    # --- MODIFICATION ---
-    # Ajout de "INTEL UHD" pour attraper les iGPU Intel courants
+    # On maintient la détection des GPU Intel, mais elle sera utilisée différemment
     is_intel_gpu = "INTEL ARC" in text or "IRIS" in text or "INTEL UHD" in text
 
     # DDR5 Check
@@ -113,25 +112,42 @@ def determine_offer(text):
     can_oc_ram = False
     can_oc_gpu = False
 
+    # Logique CPU OC (Inchangée)
     if is_intel:
+        # OC CPU possible uniquement avec K et Chipset Z
         if is_intel_k and chipset_prefix == "Z": can_oc_cpu = True
     elif is_amd:
+        # OC CPU possible avec chipset B ou X sur AMD
         if chipset_prefix in ["B", "X"]: can_oc_cpu = True
 
+    # Logique RAM OC (Inchangée)
     if is_intel:
+        # OC RAM possible avec Chipset Z ou les B non-Z unlockables
         if chipset_prefix == "Z" or is_intel_b_unlock: can_oc_ram = True
     elif is_amd:
+        # OC RAM possible avec chipset B ou X sur AMD
         if chipset_prefix in ["B", "X"]: can_oc_ram = True
 
-    # Cette logique est correcte. 
-    # Maintenant que is_intel_gpu (section B) est plus précis, 
-    # "and not is_intel_gpu" fonctionnera comme prévu.
-    if (is_nvidia or is_amd_gpu) and not is_intel_gpu: 
+    # --- CORRECTION LOGIQUE GPU OC ---
+    # L'OC GPU est possible si une carte dédiée NVIDIA ou AMD est présente.
+    # Nous ne bloquons plus si un iGPU Intel UHD est aussi présent, car la carte dédiée prime.
+    # Seules les cartes Intel Arc sont généralement OC-ables (et elles sont incluses dans 'is_intel_gpu'), mais la plupart des iGPU (UHD, Iris) ne le sont pas.
+    # Le plus simple est de vérifier la présence d'une carte dédiée.
+    if is_nvidia or is_amd_gpu:
         can_oc_gpu = True
+    # Condition spéciale pour INTEL ARC: si c'est la seule carte détectée, l'OC est souvent possible aussi
+    elif "INTEL ARC" in text and not (is_nvidia or is_amd_gpu):
+        can_oc_gpu = True
+
 
     caps = {"cpu": can_oc_cpu, "ram": can_oc_ram, "gpu": can_oc_gpu}
 
     # --- D. Sélection du Prix ---
+    # La logique des prix n'est pas modifiée, mais pour le B760/14600K:
+    # CPU OC ❌ (il faut un chipset Z)
+    # RAM OC ✅ (B760 est un chipset B unlockable)
+    # GPU OC ✅ (RTX 4060)
+    
     if is_x3d:
         return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D AM5"}
 
@@ -156,7 +172,29 @@ def determine_offer(text):
             return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
 
     # Cas par défaut si aucune offre ne correspond
+    # Ce cas devrait capturer l'OC RAM et l'OC GPU uniquement (B760 + 14600K + RTX 4060)
+    # Pour ce setup, la seule offre proche est 'RAM DDR5 + GPU' (135€).
+    # Si le bot arrive ici, c'est que l'un des deux est 'False' (ce qui était le cas avant la correction GPU)
+    # Nous ajoutons une vérification pour le cas où RAM et GPU sont les seuls True.
+    if can_oc_ram and can_oc_gpu:
+         # Ce cas est déjà géré par la logique DDR5 / DDR4 ci-dessus (lignes 197 et 205)
+         # Si nous arrivons ici, c'est que la logique des prix n'a pas été déclenchée.
+         pass # On laisse la logique des prix ci-dessus gérer
+
+    # Si la RAM et le GPU sont les seuls possibles, le pack "RAM + GPU (DDR4)" ou "RAM DDR5 + GPU" devrait s'appliquer.
+    # Dans votre cas B760 + 5986 MT/S -> DDR5, le pack 'RAM DDR5 + GPU' à 135€ devrait s'appliquer.
+
+    # On réévalue si le cas par défaut est vraiment le cas par défaut
+    if can_oc_ram and can_oc_gpu:
+        # On va s'assurer que si RAM+GPU sont possibles, on ne tombe pas sur "Sur devis"
+        if is_ddr5:
+            return {"price": "135€", "caps": caps, "is_laptop": False, "pack_name": "RAM DDR5 + GPU"}
+        else:
+            return {"price": "55€", "caps": caps, "is_laptop": False, "pack_name": "RAM + GPU (DDR4)"}
+
+
     return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
+
 
 # --- 5. EVENTS ---
 @bot.event
