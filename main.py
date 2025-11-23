@@ -89,7 +89,9 @@ def determine_offer(text):
     is_intel = "INTEL CORE" in text or "PENTIUM" in text or "CELERON" in text
     is_amd = "RYZEN" in text or "AMD" in text
     is_intel_k = bool(re.search(r'\d{3,5}K[SF]?(?!\w)', text))
-    is_x3d = "X3D" in text and any(x in text for x in ["7800", "7900", "7950", "9800"])
+    
+    # Détection X3D (AM4 et AM5)
+    is_x3d = "X3D" in text and any(x in text for x in ["5700", "5800", "7800", "7900", "7950", "9800", "9950"])
     
     chipset_match = re.search(r'\b([BZXH])\d{3}[A-Z]?\b', text)
     chipset_prefix = chipset_match.group(1) if chipset_match else "UNKNOWN"
@@ -103,8 +105,10 @@ def determine_offer(text):
 
     # DDR5 Check
     is_ddr5 = False
+    # Vérifie si la fréquence de RAM dépasse 4400 MHz (indicateur DDR5, car DDR4 est max 4400)
     freq_match = re.search(r'(\d{4})\s*(?:MHZ|MT/S)', text)
     if freq_match and int(freq_match.group(1)) > 4400: is_ddr5 = True
+    # Vérifie si le CPU est un AM5 (qui est forcément DDR5)
     if "RYZEN" in text and any(c in text for c in ["7600", "7700", "7900", "9000"]): is_ddr5 = True
 
     # --- C. Eligibilité (Capacités) ---
@@ -112,15 +116,15 @@ def determine_offer(text):
     can_oc_ram = False
     can_oc_gpu = False
 
-    # Logique CPU OC (Inchangée)
+    # Logique CPU OC
     if is_intel:
         # OC CPU possible uniquement avec K et Chipset Z
         if is_intel_k and chipset_prefix == "Z": can_oc_cpu = True
     elif is_amd:
-        # OC CPU possible avec chipset B ou X sur AMD
+        # OC CPU possible avec chipset B ou X sur AMD (tous les processeurs modernes AMD sont "débloqués")
         if chipset_prefix in ["B", "X"]: can_oc_cpu = True
 
-    # Logique RAM OC (Inchangée)
+    # Logique RAM OC
     if is_intel:
         # OC RAM possible avec Chipset Z ou les B non-Z unlockables
         if chipset_prefix == "Z" or is_intel_b_unlock: can_oc_ram = True
@@ -128,11 +132,8 @@ def determine_offer(text):
         # OC RAM possible avec chipset B ou X sur AMD
         if chipset_prefix in ["B", "X"]: can_oc_ram = True
 
-    # --- CORRECTION LOGIQUE GPU OC ---
+    # Logique GPU OC (Corrigée pour ne pas bloquer si un iGPU Intel est présent avec une carte dédiée)
     # L'OC GPU est possible si une carte dédiée NVIDIA ou AMD est présente.
-    # Nous ne bloquons plus si un iGPU Intel UHD est aussi présent, car la carte dédiée prime.
-    # Seules les cartes Intel Arc sont généralement OC-ables (et elles sont incluses dans 'is_intel_gpu'), mais la plupart des iGPU (UHD, Iris) ne le sont pas.
-    # Le plus simple est de vérifier la présence d'une carte dédiée.
     if is_nvidia or is_amd_gpu:
         can_oc_gpu = True
     # Condition spéciale pour INTEL ARC: si c'est la seule carte détectée, l'OC est souvent possible aussi
@@ -142,15 +143,14 @@ def determine_offer(text):
 
     caps = {"cpu": can_oc_cpu, "ram": can_oc_ram, "gpu": can_oc_gpu}
 
-    # --- D. Sélection du Prix ---
-    # La logique des prix n'est pas modifiée, mais pour le B760/14600K:
-    # CPU OC ❌ (il faut un chipset Z)
-    # RAM OC ✅ (B760 est un chipset B unlockable)
-    # GPU OC ✅ (RTX 4060)
+    # --- D. Sélection du Prix (Priorisation X3D) ---
     
+    # PRIORITÉ 1: Spécial X3D
     if is_x3d:
-        return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D AM5"}
+        # L'OC est possible sur tous les X3D (CPU via Curve Optimizer, RAM, GPU)
+        return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D"}
 
+    # PRIORITÉ 2: Offres DDR5
     if is_ddr5:
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
             return {"price": "195€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR5"}
@@ -161,6 +161,7 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "40€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul (DDR5)"}
     
+    # PRIORITÉ 3: Offres DDR4
     else: # DDR4
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
             return {"price": "85€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR4"}
@@ -171,28 +172,16 @@ def determine_offer(text):
         elif can_oc_cpu:
             return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
 
-    # Cas par défaut si aucune offre ne correspond
-    # Ce cas devrait capturer l'OC RAM et l'OC GPU uniquement (B760 + 14600K + RTX 4060)
-    # Pour ce setup, la seule offre proche est 'RAM DDR5 + GPU' (135€).
-    # Si le bot arrive ici, c'est que l'un des deux est 'False' (ce qui était le cas avant la correction GPU)
-    # Nous ajoutons une vérification pour le cas où RAM et GPU sont les seuls True.
+    # Cas de secours (si RAM et GPU sont les seuls possibles, et que la logique est passée à travers les packs DDR)
     if can_oc_ram and can_oc_gpu:
-         # Ce cas est déjà géré par la logique DDR5 / DDR4 ci-dessus (lignes 197 et 205)
-         # Si nous arrivons ici, c'est que la logique des prix n'a pas été déclenchée.
-         pass # On laisse la logique des prix ci-dessus gérer
-
-    # Si la RAM et le GPU sont les seuls possibles, le pack "RAM + GPU (DDR4)" ou "RAM DDR5 + GPU" devrait s'appliquer.
-    # Dans votre cas B760 + 5986 MT/S -> DDR5, le pack 'RAM DDR5 + GPU' à 135€ devrait s'appliquer.
-
-    # On réévalue si le cas par défaut est vraiment le cas par défaut
-    if can_oc_ram and can_oc_gpu:
-        # On va s'assurer que si RAM+GPU sont possibles, on ne tombe pas sur "Sur devis"
         if is_ddr5:
+            # S'assurer qu'un setup RAM/GPU DDR5 non CPU OC a une offre
             return {"price": "135€", "caps": caps, "is_laptop": False, "pack_name": "RAM DDR5 + GPU"}
         else:
+            # S'assurer qu'un setup RAM/GPU DDR4 non CPU OC a une offre
             return {"price": "55€", "caps": caps, "is_laptop": False, "pack_name": "RAM + GPU (DDR4)"}
 
-
+    # PRIORITY 4: Optimisation Windows (si aucune OC n'est possible, ou seulement RAM ou seulement GPU)
     return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
 
 
@@ -250,4 +239,3 @@ if TOKEN:
     bot.run(TOKEN)
 else:
     print("❌ ERREUR: DISCORD_TOKEN non trouvé dans le .env")
-
