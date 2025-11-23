@@ -228,12 +228,12 @@ async def on_message(message):
                     c_ram = "✅" if res["caps"]["ram"] else "❌"
                     c_gpu = "✅" if res["caps"]["gpu"] else "❌"
 
-                    response = f"**Ton PC peut faire :**\n"
+                    response = f"**Ton PC permet de faire :**\n"
                     response += f"- Un Overclock CPU {c_cpu}\n"
                     response += f"- Un Overclock RAM {c_ram}\n"
                     response += f"- Un Overclock GPU {c_gpu}\n\n"
-                    response += f"C'est donc la prestation **{res['pack_name']}** à **{res['price']}**\n"
-                    response += f"Pour faire ta demande crée ton ticket ici 👉 {TICKET_LINK}"
+                    response += f"Mopti peut faire les Overclocks à ta place pour **{res['price']}**\n"
+                    response += f"Si tu es interessé crée ton ticket ici 👉 {TICKET_LINK}"
 
                 await msg.edit(content=response)
                 return # Analyse un seul fichier HTML par message
@@ -250,3 +250,4 @@ if TOKEN:
     bot.run(TOKEN)
 else:
     print("❌ ERREUR: DISCORD_TOKEN non trouvé dans le .env")
+
