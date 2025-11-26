@@ -63,8 +63,20 @@ async def analyze_html(attachment):
         file_bytes = await attachment.read()
         html_content = file_bytes.decode('utf-8', errors='ignore')
         soup = BeautifulSoup(html_content, "html.parser")
-        text = soup.get_text(" ", strip=True).upper()
-        return {"raw_text": text}
+        
+        # 1. Récupérer le texte complet pour la détection globale (Battery, Laptop...)
+        full_text = soup.get_text(" ", strip=True).upper()
+        
+        # 2. Récupérer spécifiquement le résumé matériel (plus propre pour le CPU/GPU)
+        meta_desc = soup.find("meta", property="og:description")
+        if meta_desc:
+            # On concatène le résumé précis avec le texte global
+            # Le résumé sera utilisé pour l'analyse prioritaire
+            summary = meta_desc["content"].upper()
+            combined_text = f"SUMMARY_START {summary} SUMMARY_END {full_text}"
+            return {"raw_text": combined_text}
+            
+        return {"raw_text": full_text}
     except Exception as e:
         return {"error": f"Lecture HTML impossible : {str(e)}"}
 
