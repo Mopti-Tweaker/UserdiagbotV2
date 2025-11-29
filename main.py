@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from bs4 import BeautifulSoup
-import urllib.request 
+import urllib.request # Nécessaire pour le self-ping
 
 # --- 1. FAUX SERVEUR WEB (POUR RENDER) ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -18,23 +18,27 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is active and listening!")
 
 def start_fake_server():
+    # Récupère le port donné par Render ou utilise 8080 par défaut
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     print(f"🌍 Serveur Web actif sur le port {port}")
     server.serve_forever()
 
-# --- SYSTÈME ANTI-SOMMEIL ---
+# --- NOUVEAU : SYSTÈME ANTI-SOMMEIL ---
 def ping_self():
     while True:
+        # On attend 5 minutes (300 secondes)
         time.sleep(290) 
         try:
             port = int(os.environ.get("PORT", 8080))
+            # Le bot s'envoie une requête à lui-même
             url = f"http://127.0.0.1:{port}"
             with urllib.request.urlopen(url) as response:
                 print(f"⏰ Auto-Ping envoyé ({response.status}) : Bot maintenu éveillé.")
         except Exception as e:
             print(f"⚠️ Erreur Auto-Ping : {e}")
 
+# Lancement des tâches de fond (Serveur + Ping)
 Thread(target=start_fake_server, daemon=True).start()
 Thread(target=ping_self, daemon=True).start()
 
@@ -46,11 +50,35 @@ try:
 except:
     ID_SALON = 0
 
+# LIEN DU TICKET
 TICKET_LINK = "https://discord.com/channels/1316619303994396732/1355540389343531139/1355547355163660421"
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# --- NOUVEAU : Dictionnaire de Prix Black Friday ---
+# Contient: (Nouveau Prix, Ancien Prix, Remise, Mention Paiement, Date fin promo)
+PACK_PRICES = {
+    "Spécial X3D": ("75€", "95€", "-20€", "", "30 Novembre"),
+    
+    # DDR5
+    "Complet DDR5": ("155€", "195€", "-40€", "(Paiement en plusieurs fois possible)", "30 Novembre"),
+    "RAM DDR5 + GPU": ("115€", "135€", "-20€", "(Paiement en plusieurs fois possible)", "30 Novembre"),
+    "CPU + RAM DDR5": ("135€", "155€", "-20€", "(Paiement en plusieurs fois possible)", "30 Novembre"),
+    "CPU Seul (DDR5)": ("30€", "40€", "-10€", "", "30 Novembre"),
+    
+    # DDR4
+    "Complet DDR4": ("65€", "85€", "-20€", "", "30 Novembre"),
+    "RAM + GPU (DDR4)": ("45€", "55€", "-10€", "", "30 Novembre"),
+    "CPU + RAM (DDR4)": ("55€", "65€", "-10€", "", "30 Novembre"),
+    "CPU Seul": ("20€", "20€", "0€", "", "30 Novembre"), # Le prix reste 20€
+
+    # Autres
+    "PC Portable": ("Non pris en charge", "", "", "", ""),
+    "Optimisation Windows": ("Sur devis", "", "", "", ""),
+}
+
 
 # --- 3. MOTEUR D'ANALYSE HTML ---
 async def analyze_html(attachment):
@@ -75,18 +103,15 @@ async def analyze_html(attachment):
 def determine_offer(text):
     
     # --- A. Détection PC Portable ---
-    # CORRECTION ICI : Ajout de \b au début pour éviter de matcher des références écrans (ex: PL2473H)
     mobile_cpu = r'\b\d{4,5}(?:H|HK|HX|HS|HQ|U|P|Y)\b'
-    
-    # "BATTERY" est conservé mais attention aux onduleurs détectés comme batterie sur desktop
-    is_laptop = bool(re.search(mobile_cpu, text)) or "BATTERY" in text or "LAPTOP" in text or "INTEGRATED GRAPHICS" in text
+    # Correction : On retire "INTEGRATED GRAPHICS" pour éviter les faux positifs sur les desktops.
+    is_laptop = bool(re.search(mobile_cpu, text)) or "BATTERY" in text or "LAPTOP" in text or "NOTEBOOK" in text
     
     if is_laptop:
         return {
-            "price": "Non pris en charge",
+            "pack_name": "PC Portable",
             "caps": {"cpu": False, "ram": False, "gpu": False},
-            "is_laptop": True,
-            "pack_name": "PC Portable"
+            "is_laptop": True
         }
 
     # --- B. Matériel ---
@@ -94,6 +119,7 @@ def determine_offer(text):
     is_amd = "RYZEN" in text or "AMD" in text
     is_intel_k = bool(re.search(r'\d{3,5}K[SF]?(?!\w)', text))
     
+    # Détection X3D (AM4 et AM5)
     is_x3d = "X3D" in text and any(x in text for x in ["5700", "5800", "7800", "7900", "7950", "9800", "9950"])
     
     chipset_match = re.search(r'\b([BZXH])\d{3}[A-Z]?\b', text)
@@ -133,35 +159,39 @@ def determine_offer(text):
 
     # --- D. Sélection du Prix ---
     
-    if is_x3d:
-        return {"price": "95€", "caps": {"cpu": True, "ram": True, "gpu": True}, "is_laptop": False, "pack_name": "Spécial X3D"}
+    pack_name = "Optimisation Windows" # Default
 
-    if is_ddr5:
+    # PRIORITÉ 1: Spécial X3D
+    if is_x3d:
+        pack_name = "Spécial X3D"
+        # X3D a toujours tous les OC cochés.
+        caps = {"cpu": True, "ram": True, "gpu": True}
+    
+    # PRIORITÉ 2: Offres DDR5
+    elif is_ddr5:
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
-            return {"price": "195€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR5"}
+            pack_name = "Complet DDR5"
         elif can_oc_ram and can_oc_gpu:
-            return {"price": "135€", "caps": caps, "is_laptop": False, "pack_name": "RAM DDR5 + GPU"}
+            pack_name = "RAM DDR5 + GPU"
         elif can_oc_cpu and can_oc_ram:
-             return {"price": "155€", "caps": caps, "is_laptop": False, "pack_name": "CPU + RAM DDR5"}
+             pack_name = "CPU + RAM DDR5"
         elif can_oc_cpu:
-            return {"price": "40€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul (DDR5)"}
+            pack_name = "CPU Seul (DDR5)"
+    
+    # PRIORITÉ 3: Offres DDR4
     else: # DDR4
         if can_oc_cpu and can_oc_ram and can_oc_gpu:
-            return {"price": "85€", "caps": caps, "is_laptop": False, "pack_name": "Complet DDR4"}
+            pack_name = "Complet DDR4"
         elif can_oc_ram and can_oc_gpu:
-            return {"price": "55€", "caps": caps, "is_laptop": False, "pack_name": "RAM + GPU (DDR4)"}
+            pack_name = "RAM + GPU (DDR4)"
         elif can_oc_cpu and can_oc_ram:
-             return {"price": "65€", "caps": caps, "is_laptop": False, "pack_name": "CPU + RAM (DDR4)"}
+             pack_name = "CPU + RAM (DDR4)"
         elif can_oc_cpu:
-            return {"price": "20€", "caps": caps, "is_laptop": False, "pack_name": "CPU Seul"}
-
-    if can_oc_ram and can_oc_gpu:
-        if is_ddr5:
-            return {"price": "135€", "caps": caps, "is_laptop": False, "pack_name": "RAM DDR5 + GPU"}
-        else:
-            return {"price": "55€", "caps": caps, "is_laptop": False, "pack_name": "RAM + GPU (DDR4)"}
-
-    return {"price": "Sur devis", "caps": caps, "is_laptop": False, "pack_name": "Optimisation Windows"}
+            pack_name = "CPU Seul"
+        elif can_oc_ram and can_oc_gpu: # Cas de secours DDR4 (doit être couvert par les packs ci-dessus, mais pour sécurité)
+             pack_name = "RAM + GPU (DDR4)"
+    
+    return {"pack_name": pack_name, "caps": caps, "is_laptop": False}
 
 
 # --- 5. EVENTS ---
@@ -187,20 +217,36 @@ async def on_message(message):
 
                 res = determine_offer(data["raw_text"])
                 
+                # Récupération des données du pack à partir du dictionnaire
+                pack_data = PACK_PRICES.get(res['pack_name'], ("Sur devis", "", "", "", ""))
+                new_price, old_price, discount, mention, end_date = pack_data
+
                 if res["is_laptop"]:
-                        response = f"⛔ **PC Portable détecté**\n"
-                        response += "Nous ne réalisons pas de prestations sur les PC portables."
+                    response = f"⛔ **PC Portable détecté**\n"
+                    response += "Nous ne réalisons pas de prestations sur les PC portables."
                 else:
                     c_cpu = "✅" if res["caps"]["cpu"] else "❌"
                     c_ram = "✅" if res["caps"]["ram"] else "❌"
                     c_gpu = "✅" if res["caps"]["gpu"] else "❌"
-
+                    
                     response = f"**Ton PC permet de faire :**\n"
                     response += f"- Un Overclock CPU {c_cpu}\n"
                     response += f"- Un Overclock RAM {c_ram}\n"
                     response += f"- Un Overclock GPU {c_gpu}\n\n"
-                    response += f"Mopti peut faire les Overclocks à ta place pour **{res['price']}**\n"
-                    response += f"Si tu es interessé crée ton ticket ici 👉 {TICKET_LINK}"
+                    
+                    # FORMATAGE SPÉCIAL BLACK FRIDAY
+                    if old_price and old_price != new_price:
+                         # Utilisation de la syntaxe Discord pour le texte barré (~~)
+                        price_display = f"~~{old_price}~~ **{new_price}** ({discount}) {mention}"
+                        response += f"⚠️ **PROMO BLACK FRIDAY JUSQU'AU {end_date.upper()}** ⚠️\n"
+                        response += f"C'est la prestation **{res['pack_name']}** au prix promo de : {price_display}\n\n"
+                    else:
+                        # Si ce n'est pas une promo (comme "Optimisation Windows" ou "CPU Seul")
+                        response += f"C'est la prestation **{res['pack_name']}** à **{new_price}**\n\n"
+
+
+                # Phrase de fin
+                response += f"Si tu es interessé crée ton ticket ici 👉 {TICKET_LINK}"
 
                 await msg.edit(content=response)
                 return
